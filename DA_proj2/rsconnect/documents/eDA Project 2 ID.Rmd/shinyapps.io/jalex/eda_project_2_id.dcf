@@ -1,0 +1,12 @@
+name: eda_project_2_id
+title: eDA_Project_2_ID
+username:
+account: jalex
+server: shinyapps.io
+hostUrl: https://api.shinyapps.io/v1
+appId: 224293
+bundleId: 1025724
+url: https://jalex.shinyapps.io/eda_project_2_id/
+when: 1507924770.92276
+asMultiple: FALSE
+asStatic: FALSE

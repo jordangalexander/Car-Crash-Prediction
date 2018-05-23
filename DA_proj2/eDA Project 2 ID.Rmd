@@ -1,0 +1,171 @@
+---
+title: "Data Analytics Project 2"
+author: "Jordan Alexander"
+resource_files:
+- .Renviron
+- .Renviron
+output:
+  html_notebook:
+    code_folding: hide
+    toc: true
+    toc_depth: 4
+    toc_float: yes
+runtime: shiny
+---
+
+```{r setup, include=FALSE}
+library(data.world)
+library(tidyverse)
+library(MASS)
+library(ISLR)
+library(dplyr)
+library(SDSRegressionR)
+library(shiny)
+library(ggplot2)
+library(modelr)
+library(rms)
+library(class)
+knitr::opts_chunk$set(echo = TRUE)
+```
+Group 3:
+Jordan Alexander,
+Avery Pawelek,
+Allison Dinh,
+Shivani Lokesh,
+Hannah Ray
+
+## **R Session Info**  
+
+```{r}
+sessionInfo()
+```
+
+## **Github Link** 
+TBD
+
+## Connecting to data.world
+```{r}
+
+project <- "https://data.world/jalex11/f-17-eda-project-2"
+data.world::set_config(cfg_env("DW_API"))
+crashes <- data.world::query(
+  data.world::qry_sql("SELECT * FROM 2016crashes"),
+  dataset = project)
+```
+
+## Create Subsets for Testing/Training
+```{r}
+trainingData = subset(crashes, day_of_week > 3)
+testData = subset(crashes, day_of_week < 4)
+```
+
+Here I split the data so that I can train my models with certain data, and then test with the rest. This code is establishing my training data set to be all of the data from Wednesday, Thursday, Friday and Saturday. My testing data set is all of the data from Sunday, Monday and Tuesday.
+
+## Logistic Regression Analysis
+I prefer to build a regression model first to most efficiently investigate significant predictors to use in later models.
+```{r}
+# logical indexing to modify existing data frame
+crashes$newRearEnd <- NA
+crashes$newRearEnd [crashes$rear_end == "true"] <- 1
+crashes$newRearEnd [crashes$rear_end == "false"] <- 0
+
+glm.fit <- glm(newRearEnd ~ vehicle_count + person_count + maj_inj_count + interstate, data = crashes)
+summary(glm.fit)
+
+# odds ratios
+exp(glm.fit$coef)
+exp(confint.default(glm.fit)) # confidence intervals
+
+# predictive modeling
+logMod <- lrm(newRearEnd ~ vehicle_count + person_count + maj_inj_count + interstate, crashes)
+logMod
+```
+
+I started with a logistic regression model to examine potential signifcant predictors. My goal was to predict if a car crash was a rear-end inncident, among other crash types. The rear-end variable is a boolean (true/false), so I changed it to be a binary variable (0, 1) in a new column that I named newRearEnd. All of the predictors in the logistic regression model were statistically proven to be significant. 
+
+```{r}
+glm.probs=predict(glm.fit,type="response") 
+glm.probs[1:5]
+glm.pred=ifelse(glm.probs > 0.48, 1, 0)
+mean(glm.probs)
+
+# exploring model accuracy
+table(glm.pred, crashes$newRearEnd) # confusion matrix
+mean(glm.pred == crashes$newRearEnd) # percentage correctly predicted
+```
+
+Here, my model correctly predicts the car crash being a rear-end incident 78.36 % of the time. Given that the prior probability of a car crash being a rear-end type incident is only 27.76 %, this model does an exceptional job at predicting the outcome variable.
+
+## Quadratic Discriminant Analysis 
+```{r}
+qda.fit = qda(rear_end ~ vehicle_count + person_count + maj_inj_count + interstate, data = trainingData)
+qda.fit
+qda.class = predict(qda.fit, testData)
+table(qda.class$class, testData$rear_end) # confusion matrix
+mean(qda.class$class == testData$rear_end) # average percentage correct
+```
+
+The Quadratic Discriminant Analysis correctly predicts the car crash being a rear-end incident 74.52 % of the time. Therefore, this model is less accurate than the Logistic Regresion Model from above. The quadratic discriminant analysis also proved to be less effective in prediction than the linear discriminant analysis method as well.
+
+## K-Nearest Neighbors
+```{r}
+# logical indexing to create and modify new variables
+crashes$newInterstate <- NA
+crashes$newInterstate [crashes$interstate == "true"] <- 1
+crashes$newInterstate [crashes$interstate == "false"] <- 0
+
+attach(crashes)
+Xlag = cbind(crash_crn, vehicle_count, person_count, maj_inj_count, newInterstate)
+train = crashes$day_of_week > 4
+knn.pred = knn(Xlag[train,], Xlag[!train,], rear_end[train], use.all = TRUE)
+mean(knn.pred == rear_end[!train])
+```
+
+The K-Nearest Neighbor model's accuracy was 61.63 %, much lower than the others. This is because I had to include the variable crash_crn into Xlag so that the function knn() would not return too many ties. This drove the accuracy of the model down significantly because crash_crn is not a good predictor of the crash being a rear-end. 
+
+## Linear Discriminant Analysis
+```{r}
+lda.fit = lda(rear_end ~ vehicle_count + person_count + maj_inj_count + interstate, data = trainingData)
+lda.fit
+
+# predictive modeling
+lda.pred = predict(lda.fit, testData)
+data.frame(lda.pred)[1:5,] # quick view of the first 5 rows of lda.pred
+```
+```{r}
+# visualize the model
+df = data.frame(lda.pred)
+renderPlot(ggplot(df) + geom_boxplot(mapping = aes(x = class, y = LD1)))
+```
+
+Box Plot of LD1 and class
+
+```{r}
+# explore the accuracy of the predictive modeling
+table(lda.pred$class, testData$rear_end) # confusion matrix
+mean(lda.pred$class == testData$rear_end) # percentage correctly predicted
+```
+
+Here, we see that my model correctly predicts 79.07 % of the time that a given car crash was a rear-end incident. This is the highest accuracy achieved among the three different model types above. Compared to Logistic Regression and Quadratic Discriminant Analysis, the linear discriminant analysis model was the most effective method for our variables of interest. 
+
+
+## ROC Curve Extra Credit
+```{r}
+df1 = dplyr::bind_cols(testData, df) 
+df1 %>% dplyr::filter(rear_end == class) %>% dplyr::group_by(rear_end) %>% dplyr::summarise(n())
+df1 %>% dplyr::filter(rear_end != class) %>% dplyr::group_by(rear_end) %>% dplyr::summarise(n())
+df1 %>% dplyr::group_by(class) %>% dplyr::summarise(min(posterior.true), max(posterior.false), n())
+df2 = df1 %>% dplyr::mutate(newClass = ifelse(posterior.true > .49, 'true', 'false'))
+df2 %>% dplyr::filter(rear_end == newClass) %>% dplyr::group_by(rear_end) %>% dplyr::summarise(n())
+df2 %>% dplyr::filter(rear_end != newClass) %>% dplyr::group_by(rear_end) %>% dplyr::summarise(n())
+table(lda.pred$class, testData$rear_end)
+table(df2$newClass, testData$rear_end) # confusion matrix
+mean(df2$newClass == testData$rear_end) # percentage correct predictions
+```
+
+Here, my ROC model correctly predicts the crash being a rear-end 79.11 % of the time, which is higher than the other three models that I made before. However, only .04 % higher than the LDA model.
+
+## Conclusions
+
+In conclusion, I find it fascinating that given our data of 12,900 crashes in 2016, only 27.76 % of them were rear-end related car crashes. The number of vehicles, persons, and major injories involved in the crash proved to be the best predictors in the data set. The models also included a predictor of interstate, which was an indicator of whether or not the wreck occured on an interstate. So, despite that only 3581 crashes out of 12,900 were rear-ends, my model correctly predicts that the crash was a rear-end 79.11 % of the time. This was the highest model accuaracy I was able to achieve with our data, only marginally more accurate than the Linear Discriminant Analysis model by .04 percent. 
+
